@@ -1,4 +1,5 @@
 import os
+import pymysql
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import check_password_hash
 from dotenv import load_dotenv
