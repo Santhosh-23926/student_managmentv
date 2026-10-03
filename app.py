@@ -9,7 +9,7 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "super-secret-admission-key")
 
-# Initialize database tables on server start
+# Run database setup on start
 init_db()
 
 @app.route("/")
@@ -27,9 +27,8 @@ def login():
         try:
             conn = get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+            cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
             user = cursor.fetchone()
-            cursor.close()
             conn.close()
 
             if user and check_password_hash(user["password"], password):
@@ -52,7 +51,6 @@ def dashboard():
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM students ORDER BY id DESC")
         students = cursor.fetchall()
-        cursor.close()
         conn.close()
     except Exception as e:
         students = []
@@ -74,11 +72,10 @@ def add_student():
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO students (name, email, phone, course) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO students (name, email, phone, course) VALUES (?, ?, ?, ?)",
             (name, email, phone, course)
         )
         conn.commit()
-        cursor.close()
         conn.close()
         flash("Student added successfully!", "success")
     except Exception as e:

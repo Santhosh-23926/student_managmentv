@@ -1,15 +1,46 @@
-import os
-import pymysql
+import sqlite3
 from werkzeug.security import generate_password_hash
 
+DB_FILE = "admission.db"
+
 def get_connection():
-    return pymysql.connect(
-        host=os.getenv("DB_HOST"),
-        port=int(os.getenv("DB_PORT", 3306)),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
-        cursorclass=pymysql.cursors.DictCursor,
-        ssl={"fake_flag_to_enable_tls": True},
-        client_flag=pymysql.constants.CLIENT.MULTI_STATEMENTS
-    )
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password TEXT NOT NULL,
+            role TEXT DEFAULT 'admin'
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT,
+            phone TEXT,
+            course TEXT,
+            admission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    cursor.execute("SELECT id FROM users WHERE username = ?", ("admin",))
+    if not cursor.fetchone():
+        default_pw = generate_password_hash("admin123")
+        cursor.execute(
+            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+            ("admin", default_pw, "admin")
+        )
+        print("Default admin created: admin / admin123")
+
+    conn.commit()
+    conn.close()
+    print("Database initialized successfully.")
