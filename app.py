@@ -1,148 +1,95 @@
 import os
-import pymysql
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import check_password_hash
 from dotenv import load_dotenv
-from database import get_connection
+from database import get_connection, init_db
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "fallback_dev_key")
+app.secret_key = os.getenv("SECRET_KEY", "super-secret-admission-key")
 
-@app.route("/", methods=["GET", "POST"], strict_slashes=False)
-def login():
+# Initialize database tables on server start
+init_db()
+
+@app.route("/")
+def home():
     if "user" in session:
         return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+        password = request.form.get("password", "").strip()
 
         try:
-            con = get_connection()
-            cur = con.cursor(dictionary=True)
-            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
-            user = cur.fetchone()
-            cur.close()
-            con.close()
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
 
-            if user and check_password_hash(user["password_hash"], password):
+            if user and check_password_hash(user["password"], password):
                 session["user"] = user["username"]
-                flash("Login successful!", "success")
                 return redirect(url_for("dashboard"))
             else:
-                flash("Invalid username or password.", "danger")
+                flash("Invalid username or password.", "error")
         except Exception as e:
-            flash(f"Database error: {e}", "danger")
+            flash(f"Database error: {e}", "error")
 
     return render_template("login.html")
 
-@app.route("/logout", strict_slashes=False)
-def logout():
-    session.clear()
-    flash("Logged out successfully.", "info")
-    return redirect(url_for("login"))
-
-@app.route("/dashboard", strict_slashes=False)
+@app.route("/dashboard")
 def dashboard():
     if "user" not in session:
-        flash("Please log in first.", "warning")
         return redirect(url_for("login"))
 
-    search_query = request.args.get("search", "").strip()
-    students = []
-
     try:
-        con = get_connection()
-        cur = con.cursor(dictionary=True)
-
-        if search_query:
-            query = """SELECT * FROM student 
-                       WHERE name LIKE %s OR branch LIKE %s OR email LIKE %s 
-                       ORDER BY id DESC"""
-            cur.execute(query, (f"%{search_query}%", f"%{search_query}%", f"%{search_query}%"))
-        else:
-            cur.execute("SELECT * FROM student ORDER BY id DESC")
-
-        students = cur.fetchall()
-        cur.close()
-        con.close()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM students ORDER BY id DESC")
+        students = cursor.fetchall()
+        cursor.close()
+        conn.close()
     except Exception as e:
-        flash(f"Error fetching records: {e}", "danger")
+        students = []
+        flash(f"Could not load students: {e}", "error")
 
-    return render_template("dashboard.html", students=students, search_query=search_query)
+    return render_template("dashboard.html", user=session["user"], students=students)
 
-@app.route("/student/insert", methods=["POST"], strict_slashes=False)
-def insert_student():
+@app.route("/add_student", methods=["POST"])
+def add_student():
     if "user" not in session:
         return redirect(url_for("login"))
 
-    name = request.form.get("name", "").strip()
-    age = request.form.get("age")
-    branch = request.form.get("branch", "").strip()
-    address = request.form.get("address", "").strip()
-    email = request.form.get("email", "").strip()
+    name = request.form.get("name")
+    email = request.form.get("email")
+    phone = request.form.get("phone")
+    course = request.form.get("course")
 
     try:
-        con = get_connection()
-        cur = con.cursor()
-        query = "INSERT INTO student (name, age, branch, address, email) VALUES (%s, %s, %s, %s, %s)"
-        cur.execute(query, (name, age, branch, address, email))
-        con.commit()
-        cur.close()
-        con.close()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO students (name, email, phone, course) VALUES (%s, %s, %s, %s)",
+            (name, email, phone, course)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
         flash("Student added successfully!", "success")
     except Exception as e:
-        flash(f"Error adding student: {e}", "danger")
+        flash(f"Failed to add student: {e}", "error")
 
     return redirect(url_for("dashboard"))
 
-@app.route("/student/update", methods=["POST"], strict_slashes=False)
-def update_student():
-    if "user" not in session:
-        return redirect(url_for("login"))
-
-    student_id = request.form.get("id")
-    name = request.form.get("name", "").strip()
-    age = request.form.get("age")
-    branch = request.form.get("branch", "").strip()
-    address = request.form.get("address", "").strip()
-    email = request.form.get("email", "").strip()
-
-    try:
-        con = get_connection()
-        cur = con.cursor()
-        query = """UPDATE student 
-                   SET name = %s, age = %s, branch = %s, address = %s, email = %s 
-                   WHERE id = %s"""
-        cur.execute(query, (name, age, branch, address, email, student_id))
-        con.commit()
-        cur.close()
-        con.close()
-        flash(f"Student ID {student_id} updated successfully!", "success")
-    except Exception as e:
-        flash(f"Error updating student: {e}", "danger")
-
-    return redirect(url_for("dashboard"))
-
-@app.route("/student/delete/<int:id>", strict_slashes=False)
-def delete_student(id):
-    if "user" not in session:
-        return redirect(url_for("login"))
-
-    try:
-        con = get_connection()
-        cur = con.cursor()
-        cur.execute("DELETE FROM student WHERE id = %s", (id,))
-        con.commit()
-        cur.close()
-        con.close()
-        flash(f"Student ID {id} deleted successfully!", "info")
-    except Exception as e:
-        flash(f"Error deleting record: {e}", "danger")
-
-    return redirect(url_for("dashboard"))
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    return redirect(url_for("login"))
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
